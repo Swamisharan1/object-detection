@@ -11,7 +11,7 @@ st.title("Real-time Object Detection with YOLOv5")
 model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
 # Function to draw the bounding box while selecting ROI
-def draw_roi_box(event, x, y, flags, param):
+def draw_roi_box(event, x, y, flags):
     global roi_start, roi_end, selecting_roi, frame_with_box
 
     if event == cv2.EVENT_LBUTTONDOWN:
