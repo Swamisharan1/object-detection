@@ -1,0 +1,5 @@
+streamlit==0.86.0
+torch==1.9.0
+opencv-python==4.5.3.56
+numpy==1.21.1
+git+https://github.com/ultralytics/yolov5.git
