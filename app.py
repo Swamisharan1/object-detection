@@ -1,120 +1,99 @@
+import streamlit as st
 import torch
 import cv2
 import numpy as np
-import streamlit as st
+from PIL import Image
+from io import BytesIO
 
-drawing = False
-roi_selected = False
-point1 = (0, 0)
-point2 = (0, 0)
-canvas = None
+st.title("Real-time Object Detection with YOLOv5")
 
-# Standardize the size of the video frames
-STANDARD_WIDTH = 1020
-STANDARD_HEIGHT = 500
+# Load the YOLOv5 model
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
-def mouse_draw_rect(event, x, y, flags, params):
-    global drawing, point1, point2, canvas, roi_selected
-
-    frame = params[0]
+# Function to draw the bounding box while selecting ROI
+def draw_roi_box(event, x, y, flags, param):
+    global roi_start, roi_end, selecting_roi, frame_with_box
 
     if event == cv2.EVENT_LBUTTONDOWN:
-        drawing = True
-        point1 = (x, y)
-        point2 = (x, y)
+        selecting_roi = True
+        roi_start = (x, y)
+        roi_end = (x, y)
 
     elif event == cv2.EVENT_MOUSEMOVE:
-        if drawing:
-            canvas = frame.copy()
-            point2 = (x, y)
-            cv2.rectangle(canvas, point1, point2, (255, 0, 0), 2)  # Blue for ROI selection
-            cv2.imshow('Video', canvas)
+        if selecting_roi:
+            roi_end = (x, y)
 
     elif event == cv2.EVENT_LBUTTONUP:
-        drawing = False
-        point2 = (x, y)
-        roi_selected = True
-        canvas = frame.copy()
-        cv2.rectangle(canvas, point1, point2, (255, 0, 0), 2)  # Blue for ROI selection
-        cv2.imshow('Video', canvas)
+        selecting_roi = False
+        roi_end = (x, y)
+        cv2.rectangle(frame_with_box, roi_start, roi_end, (0, 255, 0), 2)
 
-# Function to initialize camera and start capturing video
-def start_camera():
-    cap = cv2.VideoCapture(0)  # Access the default camera (0)
+selecting_roi = False
+roi_start = (0, 0)
+roi_end = (0, 0)
+frame_with_box = None
 
-    if not cap.isOpened():
-        st.error("Error: Unable to access the camera.")
-        return None
+# Set the mouse callback function for ROI selection
+cv2.namedWindow("ROI Selector")
+cv2.setMouseCallback("ROI Selector", draw_roi_box)
 
-    return cap
+st.text("Select ROI by clicking and dragging on the 'ROI Selector' window.")
 
-# Function to release camera and close windows
-def stop_camera(cap):
-    if cap is not None:
-        cap.release()
-    cv2.destroyAllWindows()
+# Display the camera input widget
+img_file_buffer = st.camera_input("Take a picture")
 
-# Main function to run the Streamlit application
-def main():
-    st.title("Camera Object Detection with YOLOv5")
+if img_file_buffer is not None:
+    # Convert the file-like object to a PIL image
+    img = Image.open(img_file_buffer)
+    img_array = np.array(img)  # Convert PIL Image to numpy array
 
-    cap = start_camera()
-    if cap is None:
-        return
-
-    cv2.namedWindow('Video')
-
-    ret, frame = cap.read()
-    if not ret:
-        st.error("Error: Failed to capture video frame.")
-        stop_camera(cap)
-        return
-
-    frame = cv2.resize(frame, (STANDARD_WIDTH, STANDARD_HEIGHT))
-    canvas = frame.copy()
-
-    cv2.setMouseCallback('Video', mouse_draw_rect, [frame])
-
-    model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    st.text("Press 'q' to exit the video stream")
 
     while True:
-        if not roi_selected:
-            if drawing:
-                cv2.rectangle(canvas, point1, point2, (255, 0, 0), 2)  # Keep ROI rectangle visible in blue
-            cv2.imshow('Video', canvas)
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-            continue
+        ret, frame = cap.read()
+        if not ret:
+            st.error("Failed to capture image")
+            break
 
+        frame_with_box = frame.copy()
+
+        if not selecting_roi:
+            cv2.rectangle(frame_with_box, roi_start, roi_end, (0, 255, 0), 2)
+
+        cv2.imshow("ROI Selector", frame_with_box)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == 13:  # Enter key
+            break
+
+    cv2.destroyWindow("ROI Selector")
+
+    # Crop the selected ROI
+    roi = frame[roi_start[1]:roi_end[1], roi_start[0]:roi_end[0]]
+
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        frame = cv2.resize(frame, (STANDARD_WIDTH, STANDARD_HEIGHT))
-        roi = frame[point1[1]:point2[1], point1[0]:point2[0]]
+        # Resize frame for consistent processing
+        frame = cv2.resize(frame, (1020, 500))
+
+        # Perform object detection on the selected ROI
         results = model(roi)
 
+        # Draw bounding boxes and labels
         for index, row in results.pandas().xyxy[0].iterrows():
-            x1 = int(row['xmin'])
-            y1 = int(row['ymin'])
-            x2 = int(row['xmax'])
-            y2 = int(row['ymax'])
+            x1, y1, x2, y2 = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
             label = row['name']
-            confidence = row['confidence']
-            label_text = f'{label} {confidence:.2f}'
+            cv2.rectangle(roi, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(roi, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
 
-            # Draw bounding box and label
-            cv2.rectangle(roi, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green for detection boxes
-            cv2.putText(roi, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        # Display the resulting frame with detections
+        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-        frame[point1[1]:point2[1], point1[0]:point2[0]] = roi
-        cv2.rectangle(frame, point1, point2, (255, 0, 0), 2)  # Draw ROI rectangle on the frame in blue
-        cv2.imshow('Video', frame)
-
-        if cv2.waitKey(1) & 0xFF == 27:
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    stop_camera(cap)
-
-if __name__ == "__main__":
-    main()
+cap.release()
+cv2.destroyAllWindows()
