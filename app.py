@@ -3,7 +3,7 @@ import torch
 import cv2
 import numpy as np
 from PIL import Image
-from io import BytesIO
+
 
 st.title("Real-time Object Detection with YOLOv5")
 
